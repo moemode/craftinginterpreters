@@ -1,8 +1,8 @@
+#include "compiler.h"
+#include "common.h"
+#include "scanner.h"
 #include <stdio.h>
 #include <stdlib.h>
-#include "common.h"
-#include "compiler.h"
-#include "scanner.h"
 
 typedef struct {
     Token current;
@@ -11,16 +11,27 @@ typedef struct {
     bool panicMode;
 } Parser;
 
+typedef enum {
+    PREC_NONE,
+    PREC_ASSIGNMENT, // =
+    PREC_OR,         // or
+    PREC_AND,        // and
+    PREC_EQUALITY,   // == !=
+    PREC_COMPARISON, // < > <= >=
+    PREC_TERM,       // + -
+    PREC_FACTOR,     // * /
+    PREC_UNARY,      // ! -
+    PREC_CALL,       // . ()
+    PREC_PRIMARY
+} Precedence;
+
 Parser parser;
-Chunk* compilingChunk;
+Chunk *compilingChunk;
 
-static Chunk* currentChunk() {
-    return compilingChunk;
-}
-
+static Chunk *currentChunk() { return compilingChunk; }
 
 static void errorAt(Token *token, const char *message) {
-    if(parser.panicMode) {
+    if (parser.panicMode) {
         return;
     }
     parser.panicMode = true;
@@ -53,7 +64,7 @@ static void advance() {
     }
 }
 
-static void consume(TokenType type, const char* message) {
+static void consume(TokenType type, const char *message) {
     if (parser.current.type == type) {
         advance();
         return;
@@ -62,24 +73,55 @@ static void consume(TokenType type, const char* message) {
 }
 
 static void emitByte(uint8_t byte) {
-    writeChunk(currentChunk(), byte, parser.previous.line);   
+    writeChunk(currentChunk(), byte, parser.previous.line);
 }
 
-static void emitReturn() {
-    emitByte(OP_RETURN);
-}
+static void emitReturn() { emitByte(OP_RETURN); }
 
 static void emitBytes(uint8_t byte1, uint8_t byte2) {
     emitByte(byte1);
     emitByte(byte2);
 }
 
-static void endCompiler() {
-    emitReturn();
+uint8_t makeConstant(Value value) {
+    int constant = addConstant(compilingChunk, value);
+    if (constant > UINT8_MAX) {
+        error("Too many constants in one chunk.");
+        return 0;
+    }
+    return (uint8_t)constant;
 }
 
-static void expression() {
-    return;
+static void emitConstant(Value value) {
+    emitBytes(OP_CONSTANT, makeConstant(value));
+}
+
+static void endCompiler() { emitReturn(); }
+
+static void number() {
+    double value = strtod(parser.previous.start, NULL);
+    emitConstant(value);
+}
+
+static void parsePrecedence(Precedence precedence) {}
+
+static void expression() { parsePrecedence(PREC_ASSIGNMENT); }
+
+static void grouping() {
+    expression();
+    consume(TOKEN_RIGHT_PAREN, "Expect ')' after expression.");
+}
+
+static void unary() {
+    TokenType operatorType = parser.previous.type;
+    parsePrecedence(PREC_UNARY);
+    switch (operatorType) {
+    case TOKEN_MINUS:
+        emitByte(OP_NEGATE);
+        break;
+    default:
+        return;
+    }
 }
 
 bool compile(const char *source, Chunk *chunk) {
