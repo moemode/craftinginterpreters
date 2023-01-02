@@ -3,6 +3,9 @@
 #include "scanner.h"
 #include <stdio.h>
 #include <stdlib.h>
+#ifdef DEBUG_PRINT_CODE
+#include "debug.h"
+#endif
 
 typedef struct {
     Token current;
@@ -105,11 +108,33 @@ static void emitConstant(Value value) {
     emitBytes(OP_CONSTANT, makeConstant(value));
 }
 
-static void endCompiler() { emitReturn(); }
+static void endCompiler() {
+    emitReturn();
+#ifdef DEBUG_PRINT_CODE
+    if (!parser.hadError) {
+        disassembleChunk(currentChunk(), "code");
+    }
+#endif
+}
 
 static void expression();
-static ParseRule* getRule(TokenType type);
-static void parsePrecedence(Precedence precedence);
+static ParseRule *getRule(TokenType type);
+
+static void parsePrecedence(Precedence precedence) {
+    advance();
+    ParseFn prefixRule = getRule(parser.previous.type)->prefix;
+    if (prefixRule == NULL) {
+        error("Expect expression.");
+        return;
+    }
+    prefixRule();
+
+    while (precedence <= getRule(parser.current.type)->precedence) {
+        advance();
+        ParseFn infixRule = getRule(parser.previous.type)->infix;
+        infixRule();
+    }
+}
 
 static void binary() {
     TokenType operatorType = parser.previous.type;
@@ -137,8 +162,6 @@ static void number() {
     double value = strtod(parser.previous.start, NULL);
     emitConstant(value);
 }
-
-static void parsePrecedence(Precedence precedence) {}
 
 static void expression() { parsePrecedence(PREC_ASSIGNMENT); }
 
@@ -202,10 +225,7 @@ ParseRule rules[] = {
     [TOKEN_EOF] = {NULL, NULL, PREC_NONE},
 };
 
-static ParseRule* getRule(TokenType type) {
-  return &rules[type];
-}
-
+static ParseRule *getRule(TokenType type) { return &rules[type]; }
 
 bool compile(const char *source, Chunk *chunk) {
     initScanner(source);
